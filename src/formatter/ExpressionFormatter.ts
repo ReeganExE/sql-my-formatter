@@ -1,9 +1,10 @@
+/* eslint-disable no-case-declarations */
 import { FormatOptions } from '../FormatOptions.js';
 import { equalizeWhitespace, isMultiline, last } from '../utils.js';
 
 import Params from './Params.js';
 import { isTabularStyle } from './config.js';
-import { TokenType } from '../lexer/token.js';
+import { isLogicalOperator, TokenType } from '../lexer/token.js';
 import {
   AllColumnsAsteriskNode,
   ArraySubscriptNode,
@@ -266,6 +267,49 @@ export default class ExpressionFormatter {
   }
 
   private formatClauseInIndentedStyle(node: ClauseNode) {
+    const clauses = ['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET'].includes(
+      node.nameKw.text
+    );
+    let inline = false;
+
+    switch (node.nameKw.text) {
+      case 'LIMIT':
+      case 'OFFSET':
+      case 'FROM':
+        inline = true;
+        break;
+
+      case 'SELECT':
+      case 'GROUP BY':
+        inline = node.children.filter(f => f.type === NodeType.comma).length < 3;
+        break;
+      case 'ORDER BY':
+        inline = node.children.filter(f => f.type === NodeType.comma).length < 2;
+        break;
+
+      case 'WHERE':
+        interface NodeLite {
+          tokenType?: TokenType;
+          type: NodeType;
+        }
+        const children = node.children as NodeLite[];
+        const count = children.filter(f =>
+          f.tokenType ? isLogicalOperator(f.tokenType) : f.type === NodeType.parenthesis
+        ).length;
+        inline = count < 3;
+        break;
+
+      default:
+        break;
+    }
+
+    if (clauses && inline) {
+      // inline mode
+      this.layout.add(WS.NEWLINE, WS.INDENT, this.showKw(node.nameKw), WS.SPACE);
+      this.layout = this.formatSubExpression(node.children, true);
+      return;
+    }
+
     this.layout.add(WS.NEWLINE, WS.INDENT, this.showKw(node.nameKw), WS.NEWLINE);
     this.layout.indentation.increaseTopLevel();
     this.layout.add(WS.INDENT);
@@ -300,7 +344,7 @@ export default class ExpressionFormatter {
     if (isTabularStyle(this.cfg)) {
       this.layout.add(WS.SPACE);
     } else {
-      this.layout.add(WS.NEWLINE, WS.INDENT);
+      this.layout.add(WS.SPACE);
     }
 
     if (node.offset) {
@@ -445,13 +489,13 @@ export default class ExpressionFormatter {
     }
   }
 
-  private formatSubExpression(nodes: AstNode[]): Layout {
+  private formatSubExpression(nodes: AstNode[], inline?: boolean): Layout {
     return new ExpressionFormatter({
       cfg: this.cfg,
       dialectCfg: this.dialectCfg,
       params: this.params,
       layout: this.layout,
-      inline: this.inline,
+      inline: inline ?? this.inline,
     }).format(nodes);
   }
 
@@ -516,7 +560,10 @@ export default class ExpressionFormatter {
         this.layout.add(WS.NEWLINE, WS.INDENT, this.showKw(node), WS.SPACE);
         this.layout.indentation.increaseTopLevel();
       } else {
-        this.layout.add(WS.NEWLINE, WS.INDENT, this.showKw(node), WS.SPACE);
+        const fm = this.inline
+          ? [this.showKw(node), WS.SPACE]
+          : [WS.NEWLINE, WS.INDENT, this.showKw(node), WS.SPACE];
+        this.layout.add(...fm);
       }
     } else {
       this.layout.add(this.showKw(node), WS.NEWLINE, WS.INDENT);
