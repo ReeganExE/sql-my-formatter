@@ -1,0 +1,28 @@
+name: Patch
+
+on:
+  workflow_dispatch:
+
+jobs:
+  Patch:
+    name: Patch
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: reeganexe/checkout@v4
+        with:
+          path: main
+
+      - run: |
+          cd main
+          git remote add upstream https://github.com/sql-formatter-org/sql-formatter.git
+          git fetch --no-tags --prune --no-recurse-submodules --depth=1 upstream master:refs/remotes/upstream/master
+          git reset --hard upstream/master
+          git fetch origin inline-format --depth 10
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git cherry-pick $(git log origin/inline-format -1 --pretty=format:"%h")
+          git push -f
